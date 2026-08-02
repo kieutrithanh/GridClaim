@@ -2559,18 +2559,20 @@ const FeedBuilder={
     const pattern=this.config.pattern;
     const queues={SAA:[...(buckets.SAA||[])],NEW:[...(buckets.NEW||[])],BOOST:[...(buckets.BOOST||[])]};
     const feed=[]; let guard=0;
-    while((queues.SAA.length||queues.NEW.length)&&guard<500){
+    while((queues.SAA.length||queues.NEW.length||queues.BOOST.length)&&guard<500){
       guard++; let filled=false;
       for(let slot of pattern){
         if(slot==='SAA'&&queues.SAA.length){ feed.push(queues.SAA.shift()); filled=true; }
         else if(slot==='NEW'&&queues.NEW.length){ feed.push(queues.NEW.shift()); filled=true; }
+        else if(slot==='BOOST'&&queues.BOOST.length){ feed.push(queues.BOOST.shift()); filled=true; }
       }
       if(!filled){
         if(queues.SAA.length) feed.push(queues.SAA.shift());
         else if(queues.NEW.length) feed.push(queues.NEW.shift());
+        else if(queues.BOOST.length) feed.push(queues.BOOST.shift());
         else break;
       }
-      if(!queues.NEW.length&&queues.SAA.length){
+      if(!queues.NEW.length&&!queues.BOOST.length&&queues.SAA.length){
         while(queues.SAA.length&&guard<500){ feed.push(queues.SAA.shift()); guard++; }
         break;
       }
@@ -2659,7 +2661,7 @@ const DistributionEngine={
             // P4 Scope check - Spatial Layer chỉ dùng để check position
             let inScope=true;
             try{
-              inScope = (typeof DistributionScope!=='undefined') ? DistributionScope.isInScope(viewerPos, camp) : true;
+              inScope = (typeof DistributionScope!=='undefined') ? DistributionScope.isInScope(viewerPos, camp.scope_data) : true;
             }catch(e){ inScope=true; }
             if(inScope){
               // Gắn campaign vào capsule để filter và onValidView dùng
@@ -2670,7 +2672,7 @@ const DistributionEngine={
       }
     }catch(e){ console.warn('collect BOOST V2 P4',e); }
     
-    let all=[...(rawSAA||[]),...(rawNEW||[]),...(rawBOOST||[])];
+    let all=[...(rawBOOST||[]),...(rawSAA||[]),...(rawNEW||[])];
     const seen=new Set(); const deduped=[];
     for(let c of all){ if(!c||!c.tile_id) continue; if(seen.has(c.tile_id)) continue; seen.add(c.tile_id); deduped.push(c); }
     if(excludeTileId) return deduped.filter(c=>c.tile_id!==excludeTileId);
@@ -3263,7 +3265,7 @@ const BoostUIMVP = {
     try{
       const btn=document.getElementById('boostCreateBtn'); if(btn){ btn.textContent='Creating...'; btn.disabled=true; }
       const ownerId=(typeof UserStateResolver!=='undefined'&&UserStateResolver._getCurrentUserId)?UserStateResolver._getCurrentUserId():'guest';
-      const campaign=await BoostCampaignV2.create({ capsuleId:f.capsuleId, ownerId:ownerId, anchor:{type:'GPS', tile_id:f.tileId||null}, scope:{type:f.scopeType, radius_m:f.radius}, budget:f.budget, start_at:f.start_at?new Date(f.start_at).toISOString():null, end_at:f.end_at?new Date(f.end_at).toISOString():null, initialStatus:'DRAFT' });
+      const campaign=await BoostCampaignV2.create({ capsuleId:f.capsuleId, ownerId:ownerId, anchor:{type:'GPS', tile_id:f.tileId||null}, scope:{type:f.scopeType, radius_m:f.radius, center:(typeof getUserPos==='function'?getUserPos():null)}, budget:f.budget, start_at:f.start_at?new Date(f.start_at).toISOString():null, end_at:f.end_at?new Date(f.end_at).toISOString():null, initialStatus:'DRAFT' });
       toast('Campaign created: '+campaign.id.slice(-6)); this._render(); document.getElementById('boostCodeInput').value='';
     }catch(e){ document.getElementById('boostError').textContent='Create error: '+(e.message||e); document.getElementById('boostError').style.display='block'; }
     finally{ const btn=document.getElementById('boostCreateBtn'); if(btn){ btn.textContent='Create Campaign (DRAFT -> SCHEDULED)'; btn.disabled=false; } }
@@ -3333,7 +3335,7 @@ class BoostFlowV2 extends BaseFlow {
     return await BoostCampaignV2.onValidView(camp.id, 1);
   }
   isInScope(viewerPos, campaign){
-    try{ return (typeof DistributionScope!=='undefined') ? DistributionScope.isInScope(viewerPos, campaign) : true; }catch(e){ return true; }
+    try{ return (typeof DistributionScope!=='undefined') ? DistributionScope.isInScope(viewerPos, campaign.scope_data) : true; }catch(e){ return true; }
   }
 }
 
