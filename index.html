@@ -2559,18 +2559,20 @@ const FeedBuilder={
     const pattern=this.config.pattern;
     const queues={SAA:[...(buckets.SAA||[])],NEW:[...(buckets.NEW||[])],BOOST:[...(buckets.BOOST||[])]};
     const feed=[]; let guard=0;
-    while((queues.SAA.length||queues.NEW.length)&&guard<500){
+    while((queues.SAA.length||queues.NEW.length||queues.BOOST.length)&&guard<500){
       guard++; let filled=false;
       for(let slot of pattern){
         if(slot==='SAA'&&queues.SAA.length){ feed.push(queues.SAA.shift()); filled=true; }
         else if(slot==='NEW'&&queues.NEW.length){ feed.push(queues.NEW.shift()); filled=true; }
+        else if(slot==='BOOST'&&queues.BOOST.length){ feed.push(queues.BOOST.shift()); filled=true; }
       }
       if(!filled){
         if(queues.SAA.length) feed.push(queues.SAA.shift());
         else if(queues.NEW.length) feed.push(queues.NEW.shift());
+        else if(queues.BOOST.length) feed.push(queues.BOOST.shift());
         else break;
       }
-      if(!queues.NEW.length&&queues.SAA.length){
+      if(!queues.NEW.length&&!queues.BOOST.length&&queues.SAA.length){
         while(queues.SAA.length&&guard<500){ feed.push(queues.SAA.shift()); guard++; }
         break;
       }
@@ -2670,7 +2672,7 @@ const DistributionEngine={
       }
     }catch(e){ console.warn('collect BOOST V2 P4',e); }
     
-    let all=[...(rawSAA||[]),...(rawNEW||[]),...(rawBOOST||[])];
+    let all=[...(rawBOOST||[]),...(rawSAA||[]),...(rawNEW||[])];
     const seen=new Set(); const deduped=[];
     for(let c of all){ if(!c||!c.tile_id) continue; if(seen.has(c.tile_id)) continue; seen.add(c.tile_id); deduped.push(c); }
     if(excludeTileId) return deduped.filter(c=>c.tile_id!==excludeTileId);
