@@ -3265,7 +3265,7 @@ const BoostUIMVP = {
     try{
       const btn=document.getElementById('boostCreateBtn'); if(btn){ btn.textContent='Creating...'; btn.disabled=true; }
       const ownerId=(typeof UserStateResolver!=='undefined'&&UserStateResolver._getCurrentUserId)?UserStateResolver._getCurrentUserId():'guest';
-      const campaign=await BoostCampaignV2.create({ capsuleId:f.capsuleId, ownerId:ownerId, anchor:{type:'GPS', tile_id:f.tileId||null}, scope:{type:f.scopeType, radius_m:f.radius}, budget:f.budget, start_at:f.start_at?new Date(f.start_at).toISOString():null, end_at:f.end_at?new Date(f.end_at).toISOString():null, initialStatus:'DRAFT' });
+      const campaign=await BoostCampaignV2.create({ capsuleId:f.capsuleId, ownerId:ownerId, anchor:{type:'GPS', tile_id:f.tileId||null}, scope:{type:f.scopeType, radius_m:f.radius, center:(typeof getUserPos==='function'?getUserPos():null)}, budget:f.budget, start_at:f.start_at?new Date(f.start_at).toISOString():null, end_at:f.end_at?new Date(f.end_at).toISOString():null, initialStatus:'DRAFT' });
       toast('Campaign created: '+campaign.id.slice(-6)); this._render(); document.getElementById('boostCodeInput').value='';
     }catch(e){ document.getElementById('boostError').textContent='Create error: '+(e.message||e); document.getElementById('boostError').style.display='block'; }
     finally{ const btn=document.getElementById('boostCreateBtn'); if(btn){ btn.textContent='Create Campaign (DRAFT -> SCHEDULED)'; btn.disabled=false; } }
