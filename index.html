@@ -2661,7 +2661,7 @@ const DistributionEngine={
             // P4 Scope check - Spatial Layer chỉ dùng để check position
             let inScope=true;
             try{
-              inScope = (typeof DistributionScope!=='undefined') ? DistributionScope.isInScope(viewerPos, camp) : true;
+              inScope = (typeof DistributionScope!=='undefined') ? DistributionScope.isInScope(viewerPos, camp.scope_data) : true;
             }catch(e){ inScope=true; }
             if(inScope){
               // Gắn campaign vào capsule để filter và onValidView dùng
@@ -3335,7 +3335,7 @@ class BoostFlowV2 extends BaseFlow {
     return await BoostCampaignV2.onValidView(camp.id, 1);
   }
   isInScope(viewerPos, campaign){
-    try{ return (typeof DistributionScope!=='undefined') ? DistributionScope.isInScope(viewerPos, campaign) : true; }catch(e){ return true; }
+    try{ return (typeof DistributionScope!=='undefined') ? DistributionScope.isInScope(viewerPos, campaign.scope_data) : true; }catch(e){ return true; }
   }
 }
 
