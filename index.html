@@ -3392,48 +3392,28 @@ const UserStateResolver = {
   async _resolveIsLikedBatch(feedIds, currentUserId){
     const likedSet = new Set();
     if(!feedIds || !feedIds.length) return likedSet;
-    // 1. localStorage fallback (giữ nguyên logic cũ để không đổi hành vi)
+    // 1. localStorage - chỉ dùng làm cache tạm cho optimistic UI, Supabase mới là Source of Truth
     try{
       const ls = JSON.parse(localStorage.getItem(this._lsKey)||'[]');
       ls.forEach(id=>{ if(feedIds.includes(id)) likedSet.add(id); });
     }catch(e){}
 
-    // 2. Supabase batch - chỉ bổ sung isLiked, không thay đổi Capsule State
-    // Giữ nguyên logic cũ: query capsule_likes, saa_likes, likes, capsule_like
-    // Thêm filter theo user nếu có thể, nhưng vẫn fallback về query cũ để không làm hỏng MVP
-    try{
-      if(typeof supa!=='undefined' && supa){
-        const tables = ['capsule_likes','saa_likes','likes','capsule_like'];
-        for(let tbl of tables){
-          try{
-            // Thử filter theo owner_id / user_id nếu có currentUserId, nếu lỗi thì fallback không filter
-            let query = supa.from(tbl).select('capsule_id').in('capsule_id', feedIds);
-            // Thử đoán cột user: thử thêm filter nếu bảng có cột owner_id hoặc user_id
-            // Để không làm hỏng MVP, nếu filter lỗi thì sẽ catch và thử lại không filter
-            let data, error;
-            if(currentUserId){
-              try{
-                const res = await supa.from(tbl).select('capsule_id').in('capsule_id', feedIds).eq('owner_id', currentUserId);
-                if(!res.error && res.data && res.data.length){ data=res.data; error=null; }
-                else {
-                  const res2 = await supa.from(tbl).select('capsule_id').in('capsule_id', feedIds).eq('user_id', currentUserId);
-                  if(!res2.error){ data=res2.data; error=res2.error; } else { data=null; error=res2.error; }
-                }
-              }catch(_){ /* ignore */ }
-            }
-            if(!data){
-              const res = await query;
-              data=res.data; error=res.error;
-            }
-            if(!error && data && data.length){
-              data.forEach(r=>{ if(r.capsule_id) likedSet.add(r.capsule_id); });
-              // Giữ nguyên hành vi cũ: break sau khi tìm thấy bảng có data
-              break;
-            }
-          }catch(_){ }
+    // 2. Đọc thẳng bảng thật duy nhất: capsule_likes, lọc đúng theo user hiện tại.
+    // Không còn dò 4 bảng (saa_likes/likes/capsule_like không tồn tại trong DB thật).
+    if(currentUserId){
+      try{
+        if(typeof supa!=='undefined' && supa){
+          const {data, error} = await supa
+            .from('capsule_likes')
+            .select('capsule_id')
+            .in('capsule_id', feedIds)
+            .eq('user_id', currentUserId);
+          if(!error && data && data.length){
+            data.forEach(r=>{ if(r.capsule_id) likedSet.add(r.capsule_id); });
+          }
         }
-      }
-    }catch(e){}
+      }catch(e){}
+    }
     return likedSet;
   },
 
@@ -3556,12 +3536,14 @@ const PhaseSpace = {
     }catch(e){}
     try{
       if(typeof supa!=='undefined' && supa){
-        const tables = ['capsule_likes','saa_likes','likes','capsule_like'];
-        for(let tbl of tables){
-          try{
-            const {data, error} = await supa.from(tbl).select('capsule_id').in('capsule_id', feedIds);
-            if(!error && data && data.length){ data.forEach(r=>{ if(r.capsule_id) this._liked.add(r.capsule_id); }); break; }
-          }catch(_){ }
+        const uid = (typeof UserStateResolver!=='undefined' && UserStateResolver._getCurrentUserId) ? UserStateResolver._getCurrentUserId() : null;
+        if(uid){
+          const {data, error} = await supa
+            .from('capsule_likes')
+            .select('capsule_id')
+            .in('capsule_id', feedIds)
+            .eq('user_id', uid);
+          if(!error && data && data.length){ data.forEach(r=>{ if(r.capsule_id) this._liked.add(r.capsule_id); }); }
         }
       }
     }catch(e){}
