@@ -1178,6 +1178,23 @@ function getAuthMethod(){
 // --- distance helpers for 10m enforcement (DO NOT TOUCH) ---
 function getCellCenter(id){ try{ const c=h3.cellToLatLng(id); return {lat:c[0],lng:c[1]} }catch(e){ return null } }
 function haversineM(a,b){ const R=6371000; const toRad=x=>x*Math.PI/180; const dLat=toRad(b.lat-a.lat); const dLng=toRad(b.lng-a.lng); const s1=Math.sin(dLat/2),s2=Math.sin(dLng/2); const aa=s1*s1+Math.cos(toRad(a.lat))*Math.cos(toRad(b.lat))*s2*s2; return 2*R*Math.asin(Math.sqrt(aa)); }
+// === PULL Radius fix (Hướng 2): tính tọa độ tâm Tile và khoảng cách Tile-to-Tile bằng h3-js đã có sẵn ở client ===
+function tileCenterPos(tileId){
+  try{
+    if(typeof h3!=='undefined' && h3.cellToLatLng && tileId){
+      const [lat,lng]=h3.cellToLatLng(tileId);
+      return {lat,lng};
+    }
+  }catch(e){ console.warn('tileCenterPos error', tileId, e); }
+  return null;
+}
+function tileDistanceM(tileIdA,tileIdB){
+  if(!tileIdA||!tileIdB) return Infinity;
+  if(tileIdA===tileIdB) return 0;
+  const a=tileCenterPos(tileIdA), b=tileCenterPos(tileIdB);
+  if(!a||!b) return Infinity;
+  return haversineM(a,b);
+}
 function getUserPos(){ if(userMarker){ const ll=userMarker.getLatLng(); return {lat:ll.lat,lng:ll.lng} } if(cur&&cur[0]) return {lat:cur[0],lng:cur[1]}; return null; }
 function isWithinClaimRange(cellId,maxM){ maxM=maxM||10; const up=getUserPos(); if(!up) return {ok:false,dist:null,reason:'No GPS'}; const cc=getCellCenter(cellId); if(!cc) return {ok:false,dist:null,reason:'Invalid cell'}; const d=haversineM(up,cc); return {ok:d<=maxM,dist:d,reason:d>maxM? (Math.round(d)+'m away'):'in range'}; }
 
@@ -2453,13 +2470,19 @@ const MatureRule={
 
 class NewFlow extends BaseFlow {
   constructor(){ super('NEW'); }
-  filter(capsules){
+  filter(capsules,viewerTileId){
     return (capsules||[]).filter(c=>{
       const state=CapsuleState.from(c);
       if(state!==CapsuleState.NEW) return false;
       const budget=DiscoveryBudgetStore._cache.get(c.id) || DiscoveryBudgetStore._cache.get(c.tile_id);
       if(budget && budget.remaining<=0) return false;
       if(budget && budget.state==='STATIC') return false;
+      // PULL Radius fix: Discovery Radius riêng của New (trước đây thiếu hoàn toàn, không lọc gì cả)
+      if(viewerTileId && c.tile_id){
+        const radius=(budget && budget.radius) || 1000;
+        const d=(typeof tileDistanceM==='function') ? tileDistanceM(viewerTileId,c.tile_id) : 0;
+        if(d>radius) return false;
+      }
       return true;
     });
   }
@@ -2519,7 +2542,7 @@ const SAAOrganicConfig = {
 
 class SAAFlow extends BaseFlow {
   constructor(){ super('SAA'); }
-  filter(caps){
+  filter(caps,viewerTileId){
     // E3: Chỉ ORGANIC, và tôn trọng tín hiệu SAA hiện có
     // Không tạo thêm Reputation, không tạo score mới
     return (caps||[]).filter(c=>{
@@ -2527,6 +2550,12 @@ class SAAFlow extends BaseFlow {
       // Nếu backend đã gắn flag _saa_filtered (do report nhiều, attention thấp), tôn trọng
       if(c._saa_should_hide) return false;
       if(c.is_hidden || c.is_reported_heavy) return false;
+      // PULL Radius fix: PUSH radius riêng của SAA (tối đa 1000m Organic), tính từ Tile chứa Capsule
+      if(viewerTileId && c.tile_id){
+        const radius=c._push_radius || 1000;
+        const d=(typeof tileDistanceM==='function') ? tileDistanceM(viewerTileId,c.tile_id) : 0;
+        if(d>radius) return false;
+      }
       // Attention check - chỉ là config, không phải thuật toán mới
       // Backend SAA đã tính attention, frontend chỉ đọc nếu có
       // Không tự tính lại attention
@@ -2585,16 +2614,25 @@ const FeedBuilder={
 const DistributionEngine={
   _flows:new Map(),
   _pattern:['SAA','SAA','NEW','BOOST'],
+  PULL_RADIUS_M: 1000, // MVP — PULL thuộc Viewer, neo vào Tile đang mở Phase
   registerFlow(f){ if(!f||!f.name) return; this._flows.set(f.name,f); },
   async collect(viewerPos,excludeTileId,limit=50){
     const COLLECT_ID = 'COLLECT_' + Date.now();
     console.group(`%c[COLLECT ${COLLECT_ID}] DistributionEngine.collect() viewerPos=${JSON.stringify(viewerPos)} excludeTileId=${excludeTileId}`, 'color:#00aaff;font-weight:bold');
     console.log(`[COLLECT] Start`, {viewerPos, excludeTileId, limit, COLLECT_ID, ts:new Date().toISOString()});
+    // Hướng 2 (PULL Radius fix): saa_get_nearby không tồn tại trong Supabase (đã xác nhận trực tiếp trên DB) →
+    // bỏ RPC, query capsule ORGANIC trực tiếp giống cách NEW đang làm. PUSH radius riêng của từng Capsule
+    // (_push_radius) được gắn kèm để SAAFlow.filter() tự áp dụng sau, Engine không đọc giá trị này.
     let rawSAA=[];
     try{
-      if(typeof SAA!=='undefined'&&SAA.getNearby){
-        if(viewerPos) rawSAA=await SAA.getNearby(viewerPos.lat,viewerPos.lng,limit);
-        else rawSAA=await SAA.getNearby(0,0,limit);
+      if(typeof supa!=='undefined'&&supa){
+        const {data:distData,error:distErr}=await supa.from('capsule_distribution').select('tile_id,discovery_radius').eq('state','ORGANIC').limit(200);
+        if(!distErr&&distData&&distData.length){
+          const radiusByTile={}; distData.forEach(d=>{ radiusByTile[d.tile_id]=d.discovery_radius||1000; });
+          const tileIds=distData.map(d=>d.tile_id);
+          const {data:caps}=await supa.from('capsules').select('*').in('tile_id',tileIds);
+          if(caps) rawSAA=caps.map(c=>({...c, _push_radius: radiusByTile[c.tile_id]||1000}));
+        }
       }
     }catch(e){ console.warn('collect SAA',e); rawSAA=[]; }
     let rawNEW=[];
@@ -2673,18 +2711,33 @@ const DistributionEngine={
     }catch(e){ console.warn('collect BOOST V2 P4',e); }
     
     let all=[...(rawBOOST||[]),...(rawSAA||[]),...(rawNEW||[])];
+
+    // ==== PULL Filter (Candidate Space) — quy tắc nghiệp vụ đã chốt ====
+    // Engine CHỈ biết PULL (neo vào Tile đang mở Phase = excludeTileId), KHÔNG biết PUSH/Discovery Radius/Scope —
+    // ba thứ đó vẫn thuộc từng Flow (SAAFlow/NewFlow xử lý riêng bên dưới trong routeCapsules()).
+    // Boost KHÔNG qua PULL — Boost tự quyết định phạm vi qua DistributionScope (GPS/City/Province/Country/Global),
+    // đây là quyền phân phối trả phí, cố tình vượt ra ngoài PULL 1000m mặc định.
+    if(excludeTileId){
+      all = all.filter(c=>{
+        if(!c || !c.tile_id) return false;
+        if(c._isBoost) return true;
+        const d = tileDistanceM(excludeTileId, c.tile_id);
+        return d <= this.PULL_RADIUS_M;
+      });
+    }
+
     const seen=new Set(); const deduped=[];
     for(let c of all){ if(!c||!c.tile_id) continue; if(seen.has(c.tile_id)) continue; seen.add(c.tile_id); deduped.push(c); }
     if(excludeTileId) return deduped.filter(c=>c.tile_id!==excludeTileId);
     return deduped;
   },
-  routeCapsules(capsules){
+  routeCapsules(capsules,tileId){
     console.log(`%c[ROUTER] routeCapsules ${capsules?.length} capsules`, 'color:#aa00ff;font-weight:bold', capsules?.map(c=>({id:c.id, tile_id:c.tile_id, state: (typeof CapsuleState!=='undefined'? CapsuleState.from(c):'unknown')})));
     const bucketsRaw=FlowRouter.routeBatch(capsules);
     const bucketsFiltered={};
     for(let [name,list] of Object.entries(bucketsRaw)){
       const flow=this._flows.get(name);
-      if(flow&&typeof flow.filter==='function') bucketsFiltered[name]=flow.filter(list);
+      if(flow&&typeof flow.filter==='function') bucketsFiltered[name]=flow.filter(list,tileId);
       else bucketsFiltered[name]=list;
     }
     return bucketsFiltered;
@@ -2692,7 +2745,7 @@ const DistributionEngine={
   buildFeed(buckets){ FeedBuilder.setPattern(this._pattern); return FeedBuilder.merge(buckets); },
   async execute(viewerPos,excludeTileId){
     const collected=await this.collect(viewerPos,excludeTileId);
-    const routed=this.routeCapsules(collected);
+    const routed=this.routeCapsules(collected,excludeTileId);
     const feed=this.buildFeed(routed);
     return {collected,routed,feed};
   },
@@ -3480,9 +3533,9 @@ const PhaseSpace = {
     // 1. Entry Capsule Rule - always first, not part of feed pattern
     this._entryCapsule = this._capsule || null;
 
-    // 2. Collect around Viewer GPS via Distribution Engine
+    // 2. Collect trong PULL của Tile đang mở Phase (PULL neo vào Tile, không dùng GPS sống của Viewer — xem note PULL Radius)
     let viewerPos = null;
-    try{ viewerPos = (typeof getUserPos==='function') ? getUserPos() : null; }catch(e){}
+    try{ viewerPos = tileCenterPos(tileId); }catch(e){}
     const result = await DistributionEngine.execute(viewerPos, tileId);
     this._distribution = result;
     let rawFeed = result.feed || [];
