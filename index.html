@@ -1742,6 +1742,7 @@ const CapsuleUI = {
     this._wasInPhase = !!(document.getElementById('phaseSpace') && document.getElementById('phaseSpace').classList.contains('show'));
     this._prevTileId = this.currentTile;
     if(!this._wasInPhase){ try{ closeCell(); }catch(e){} }
+    else { const ps=document.getElementById('phaseSpace'); if(ps){ ps.classList.remove('show'); ps.style.display='none'; } }
     setTimeout(()=> { 
       const editor=document.getElementById('sheetCapsuleEditor');
       if(editor){ editor.style.display=''; editor.style.zIndex='965'; }
@@ -3151,6 +3152,7 @@ const BoostUIMVP = {
       const ov=document.getElementById('overlay'); if(ov){ ov.classList.remove('show'); ov.style.display='none'; }
       const bd=document.getElementById('sheetBackdrop'); if(bd){ bd.classList.remove('show'); bd.style.display='none'; }
       document.querySelectorAll('.bottomSheet').forEach(s=>{ if(s.id!=='sheetBoostManager'){ s.classList.remove('show'); s.style.display='none'; s.style.zIndex=''; } });
+      if(typeof CapsuleUI!=='undefined' && CapsuleUI._wasInPhase){ const ps=document.getElementById('phaseSpace'); if(ps){ ps.classList.remove('show'); ps.style.display='none'; } }
     }catch(e){}
     this._render(); this._bindScope();
     setTimeout(()=>{
@@ -3162,7 +3164,17 @@ const BoostUIMVP = {
   },
   close(){
     const bm=document.getElementById('sheetBoostManager'); if(bm) bm.classList.remove('show');
-    setTimeout(()=>{ closeSheets(); if(bm){ bm.style.zIndex=''; bm.style.display=''; } }, 180);
+    setTimeout(()=>{
+      closeSheets();
+      if(bm){ bm.style.zIndex=''; bm.style.display=''; }
+      const ps=document.getElementById('phaseSpace');
+      if(typeof CapsuleUI!=='undefined' && CapsuleUI._wasInPhase && ps){
+        ps.style.display='flex';
+        ps.style.zIndex='950';
+        requestAnimationFrame(()=>ps.classList.add('show'));
+        if(window.PhaseSpace){ setTimeout(()=> PhaseSpace.renderFeed(), 120); }
+      }
+    }, 180);
   },
   _bindScope(){
     const sel=document.getElementById('boostScopeType'); const row=document.getElementById('boostRadiusRow');
@@ -3209,7 +3221,6 @@ if(typeof CapsuleUI!=='undefined'){
   CapsuleUI.openBoost = function(){
     const capId=this.currentCapsule?.id||''; const tileId=this.currentTile||window.curH||'';
     if(!capId){ toast('Save capsule first'); return; }
-    this._wasInPhase=false;
     BoostUIMVP.open(capId, tileId);
   };
   const origOpenEditor=CapsuleUI.openEditor;
