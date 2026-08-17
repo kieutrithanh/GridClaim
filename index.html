@@ -3042,7 +3042,8 @@ const PhaseSpace = {
     const title = this._esc(cap.title||'Untitled');
     const desc = this._esc(cap.description||'');
     const tileShort = (cap.tile_id||'').slice(-6).toUpperCase();
-    const liked = (cap._userState && typeof cap._userState.isLiked!=='undefined') ? cap._userState.isLiked : this._liked.has(cap.id);
+    // FIX 17/08: Ưu tiên _liked (state sống, cập nhật ngay sau khi Like) trước _userState.isLiked (snapshot cũ lúc load Feed)
+    const liked = this._liked.has(cap.id) || !!(cap._userState && cap._userState.isLiked);
     const badgeText = isEntry ? 'CONTEXT • ENTRY' : (flowLabel||'SAA');
     const badgeClass = isEntry ? 'current' : '';
     return `<div class="phaseFeed">
