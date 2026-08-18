@@ -10,18 +10,22 @@ jobs:
   gemini:
     runs-on: ubuntu-latest
     permissions:
-      contents: write
+      contents: read
       issues: write
-      pull-requests: write
+      pull-requests: read
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Run Gemini CLI
-        uses: google-github-actions/run-gemini-cli@v0
-        env:
-          GEMINI_CLI_TRUST_WORKSPACE: "true"
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
         with:
-          gemini_api_key: ${{ secrets.GEMINI_API_KEY }}
-          extra_args: "--skip-trust"
+          node-version: '20'
+
+      - name: Install & Run Gemini CLI
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GEMINI_CLI_TRUST_WORKSPACE: "true"
+        run: |
+          npx @google/gemini-cli --skip-trust "Hãy phân tích dự án này và trả lời issue"
