@@ -1,12 +1,10 @@
 name: Gemini CLI Assistant
 
 on:
-  issue_comment:
-    types: [created]
   issues:
     types: [opened]
-  pull_request:
-    types: [opened, synchronize]
+  issue_comment:
+    types: [created]
 
 jobs:
   gemini:
@@ -22,8 +20,5 @@ jobs:
 
       - name: Run Gemini CLI
         uses: google-github-actions/run-gemini-cli@v0
-        env:
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          prompt: "Review code changes or help with issue"
+          gemini_api_key: ${{ secrets.GEMINI_API_KEY }}
